@@ -29,13 +29,46 @@ func JWTMiddleware() fiber.Handler {
 			})
 		}
 
-		// Get user_id from token and save to context
+		// Get user_id and role from token and save to context
 		if claims, ok := token.Claims.(jwt.MapClaims); ok {
 			if userID, exists := claims["user_id"]; exists {
 				c.Locals("user_id", int(userID.(float64)))
+			}
+			if role, exists := claims["role"]; exists {
+				c.Locals("role", role.(string))
 			}
 		}
 
 		return c.Next()
 	}
+}
+
+// RoleMiddleware creates a middleware that checks for specific roles
+func RoleMiddleware(allowedRoles ...string) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		userRole := c.Locals("role")
+		if userRole == nil {
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+				"error": "No role information found in token",
+			})
+		}
+
+		role := userRole.(string)
+
+		// Check if user's role is in the allowed roles
+		for _, allowedRole := range allowedRoles {
+			if role == allowedRole {
+				return c.Next()
+			}
+		}
+
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+			"error": "Insufficient permissions",
+		})
+	}
+}
+
+// AdminMiddleware is a convenience function for admin-only endpoints
+func AdminMiddleware() fiber.Handler {
+	return RoleMiddleware("admin")
 }

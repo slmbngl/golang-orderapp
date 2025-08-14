@@ -22,22 +22,29 @@ func SetupRoutes(app *fiber.App) {
 	// Order endpoints (JWT required)
 	SetupOrderRoutes(api)
 
+	// Admin endpoints (Admin role required)
+	SetupAdminRoutes(api)
+
 }
+
 func SetupAuthRoutes(api fiber.Router) {
 	auth := api.Group("/auth")
 	auth.Post("/register", handler.Register)
 	auth.Post("/login", handler.Login)
+	auth.Get("/profile", middleware.JWTMiddleware(), handler.GetMe)
 }
+
 func SetupProductRoutes(api fiber.Router) {
 	products := api.Group("/products")
 	products.Get("/", handler.GetProducts)
 	products.Get("/:id", handler.GetProductByID)
 
 	// Protected routes for product management
-	products.Post("/", middleware.JWTMiddleware(), handler.CreateProduct)
-	products.Put("/:id", middleware.JWTMiddleware(), handler.UpdateProduct)
-	products.Delete("/:id", middleware.JWTMiddleware(), handler.DeleteProduct)
+	products.Post("/", middleware.JWTMiddleware(), middleware.AdminMiddleware(), handler.CreateProduct)
+	products.Put("/:id", middleware.JWTMiddleware(), middleware.AdminMiddleware(), handler.UpdateProduct)
+	products.Delete("/:id", middleware.JWTMiddleware(), middleware.AdminMiddleware(), handler.DeleteProduct)
 }
+
 func SetupOrderRoutes(api fiber.Router) {
 	orders := api.Group("/orders", middleware.JWTMiddleware())
 	orders.Get("/", handler.GetOrders)
@@ -45,4 +52,10 @@ func SetupOrderRoutes(api fiber.Router) {
 	orders.Post("/", handler.CreateOrder)
 	orders.Put("/:id/status", handler.UpdateOrderStatus)
 	orders.Delete("/:id", handler.DeleteOrder)
+}
+
+func SetupAdminRoutes(api fiber.Router) {
+	admin := api.Group("/admin", middleware.JWTMiddleware(), middleware.AdminMiddleware())
+	admin.Get("/users", handler.GetAllUsers)             // Tüm kullanıcıları listele
+	admin.Put("/users/:id/role", handler.UpdateUserRole) // Kullanıcı rolünü güncelle
 }
