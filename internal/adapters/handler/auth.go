@@ -2,6 +2,7 @@ package handler
 
 import (
 	"strconv"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/slmbngl/OrderAplication/internal/models"
@@ -74,16 +75,35 @@ func Login(c *fiber.Ctx) error {
 		return c.Status(401).JSON(fiber.Map{"error": "Invalid username or password"})
 	}
 
-	token, err := service.GenerateJWT(dbUser.ID, dbUser.Role)
+	// create Access Token (15 minutes)
+	accessToken, err := service.GenerateAccessToken(dbUser.ID, dbUser.Role)
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "Token could not be created"})
+		return c.Status(500).JSON(fiber.Map{"error": "Access token could not be created"})
+	}
+
+	// create Refresh token (7 days)
+	refreshToken, err := service.GenerateRefreshToken()
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Refresh token could not be created"})
+	}
+
+	// save refresh token to database
+	expiresAt := time.Now().Add(service.RefreshTokenDuration)
+	err = userRepo.SaveRefreshToken(dbUser.ID, refreshToken, expiresAt)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Refresh token could not be saved"})
 	}
 
 	return c.JSON(fiber.Map{
-		"token":    token,
-		"user_id":  dbUser.ID,
-		"username": dbUser.Username,
-		"role":     dbUser.Role,
+		"access_token":  accessToken,
+		"refresh_token": refreshToken,
+		"token_type":    "Bearer",
+		"expires_in":    int(service.AccessTokenDuration.Seconds()), // 900 seconds (15 minutes)
+		"user": fiber.Map{
+			"id":       dbUser.ID,
+			"username": dbUser.Username,
+			"role":     dbUser.Role,
+		},
 	})
 }
 
@@ -201,4 +221,124 @@ func GetMe(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(user)
+}
+
+// RefreshToken godoc
+// @Summary Refresh access token
+// @Description Generate a new access token using refresh token
+// @Tags auth
+// @Accept json
+// @Produce json
+// @Param refresh_token body models.RefreshTokenRequest true "Refresh token data"
+// @Success 200 {object} map[string]interface{} "New access token"
+// @Failure 400 {string} string "Invalid input"
+// @Failure 401 {string} string "Invalid or expired refresh token"
+// @Failure 500 {string} string "Access token could not be created"
+// @Router /api/auth/refresh [post]
+func RefreshToken(c *fiber.Ctx) error {
+	var req map[string]string
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "Invalid input"})
+	}
+
+	refreshToken, exists := req["refresh_token"]
+	if !exists {
+		return c.Status(400).JSON(fiber.Map{"error": "Refresh token is required"})
+	}
+
+	userRepo := repository.NewUserRepository()
+
+	// Get the refresh token from the database
+	storedToken, err := userRepo.GetRefreshToken(refreshToken)
+	if err != nil {
+		return c.Status(401).JSON(fiber.Map{"error": "Invalid refresh token"})
+	}
+
+	// Check token expiration
+	if time.Now().After(storedToken.ExpiresAt) {
+		// Delete expired token
+		userRepo.DeleteRefreshToken(refreshToken)
+		return c.Status(401).JSON(fiber.Map{"error": "Refresh token expired"})
+	}
+
+	// Get user information
+	user, err := userRepo.GetByID(storedToken.UserID)
+	if err != nil {
+		return c.Status(401).JSON(fiber.Map{"error": "User not found"})
+	}
+
+	// Get detailed user information (for role)
+	dbUser, err := userRepo.GetByUsername(user.Username)
+	if err != nil {
+		return c.Status(401).JSON(fiber.Map{"error": "User not found"})
+	}
+
+	// Create new access token
+	newAccessToken, err := service.GenerateAccessToken(dbUser.ID, dbUser.Role)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Access token could not be created"})
+	}
+
+	return c.JSON(fiber.Map{
+		"access_token": newAccessToken,
+		"token_type":   "Bearer",
+		"expires_in":   int(service.AccessTokenDuration.Seconds()),
+	})
+}
+
+// Logout godoc
+// @Summary Logout user
+// @Description Logout user by invalidating refresh token
+// @Tags auth
+// @Accept json
+// @Produce json
+// @Param refresh_token body models.LogoutRequest true "Refresh token data"
+// @Success 200 {object} map[string]string "Success message"
+// @Failure 400 {string} string "Invalid input"
+// @Router /api/auth/logout [post]
+func Logout(c *fiber.Ctx) error {
+	var req map[string]string
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "Invalid input"})
+	}
+
+	refreshToken, exists := req["refresh_token"]
+	if !exists {
+		return c.Status(400).JSON(fiber.Map{"error": "Refresh token is required"})
+	}
+
+	userRepo := repository.NewUserRepository()
+
+	// Delete refresh token
+	err := userRepo.DeleteRefreshToken(refreshToken)
+	if err != nil {
+		// Even if there's an error, we return success (token may already be gone)
+	}
+
+	return c.JSON(fiber.Map{"message": "Successfully logged out"})
+}
+
+// LogoutAllDevices godoc
+// @Summary Logout from all devices
+// @Description Logout user from all devices by invalidating all refresh tokens
+// @Tags auth
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {object} models.LogoutRequest "Success message"
+// @Failure 401 {string} string "Unauthorized"
+// @Failure 500 {string} string "Logout failed"
+// @Router /api/auth/logout-all [post]
+func LogoutAllDevices(c *fiber.Ctx) error {
+	userID := c.Locals("user_id").(int)
+
+	userRepo := repository.NewUserRepository()
+
+	// Delete all refresh tokens for the user
+	err := userRepo.DeleteUserRefreshTokens(userID)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Logout failed"})
+	}
+
+	return c.JSON(fiber.Map{"message": "Successfully logged out from all devices"})
 }

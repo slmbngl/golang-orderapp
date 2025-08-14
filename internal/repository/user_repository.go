@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"time"
 
 	"github.com/slmbngl/OrderAplication/internal/adapters/db"
 	"github.com/slmbngl/OrderAplication/internal/models"
@@ -13,7 +14,22 @@ type UserRepository interface {
 	GetAllUsers() ([]models.User, error)
 	UpdateUserRole(userID int, role string) error
 	GetByID(userID int) (*models.GetMeResponseReq, error) // Optional: Get user by ID
+	// Refresh token functions
+	SaveRefreshToken(userID int, token string, expiresAt time.Time) error
+	GetRefreshToken(token string) (*RefreshToken, error)
+	DeleteRefreshToken(token string) error
+	DeleteUserRefreshTokens(userID int) error
 }
+
+// Refresh Token modeli
+type RefreshToken struct {
+	ID        int       `json:"id"`
+	UserID    int       `json:"user_id"`
+	Token     string    `json:"token"`
+	ExpiresAt time.Time `json:"expires_at"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
 type userRepo struct{}
 
 func NewUserRepository() UserRepository {
@@ -117,4 +133,40 @@ type UserNotFoundError struct {
 
 func (e *UserNotFoundError) Error() string {
 	return "user not found"
+}
+
+// SaveRefreshToken saves a refresh token for a user
+func (r *userRepo) SaveRefreshToken(userID int, token string, expiresAt time.Time) error {
+	_, err := db.Pool.Exec(context.Background(),
+		`INSERT INTO refresh_tokens (user_id, token, expires_at) VALUES ($1, $2, $3)`,
+		userID, token, expiresAt)
+	return err
+}
+
+// Get a specific refresh token
+func (r *userRepo) GetRefreshToken(token string) (*RefreshToken, error) {
+	var rt RefreshToken
+	err := db.Pool.QueryRow(context.Background(),
+		`SELECT id, user_id, token, expires_at, created_at FROM refresh_tokens WHERE token = $1`,
+		token).Scan(&rt.ID, &rt.UserID, &rt.Token, &rt.ExpiresAt, &rt.CreatedAt)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &rt, nil
+}
+
+// Delete a specific refresh token
+func (r *userRepo) DeleteRefreshToken(token string) error {
+	_, err := db.Pool.Exec(context.Background(),
+		`DELETE FROM refresh_tokens WHERE token = $1`, token)
+	return err
+}
+
+// Delete user refresh tokens (logout all devices)
+func (r *userRepo) DeleteUserRefreshTokens(userID int) error {
+	_, err := db.Pool.Exec(context.Background(),
+		`DELETE FROM refresh_tokens WHERE user_id = $1`, userID)
+	return err
 }

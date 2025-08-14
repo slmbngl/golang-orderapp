@@ -32,6 +32,10 @@ func SetupAuthRoutes(api fiber.Router) {
 	auth.Post("/register", handler.Register)
 	auth.Post("/login", handler.Login)
 	auth.Get("/profile", middleware.JWTMiddleware(), handler.GetMe)
+	auth.Post("/refresh", handler.RefreshToken)
+	auth.Post("/logout", handler.Logout)
+	auth.Post("/logout-all", middleware.JWTMiddleware(), handler.LogoutAllDevices)
+
 }
 
 func SetupProductRoutes(api fiber.Router) {
@@ -56,6 +60,6 @@ func SetupOrderRoutes(api fiber.Router) {
 
 func SetupAdminRoutes(api fiber.Router) {
 	admin := api.Group("/admin", middleware.JWTMiddleware(), middleware.AdminMiddleware())
-	admin.Get("/users", handler.GetAllUsers)             // Tüm kullanıcıları listele
-	admin.Put("/users/:id/role", handler.UpdateUserRole) // Kullanıcı rolünü güncelle
+	admin.Get("/users", handler.GetAllUsers)             // List all users
+	admin.Put("/users/:id/role", handler.UpdateUserRole) // Update user role
 }
