@@ -16,13 +16,13 @@ import (
 // @Tags auth
 // @Accept json
 // @Produce json
-// @Param user body models.UserResponseReq true "User registration data"
+// @Param user body models.UserRegisterResponseReq true "User registration data"
 // @Success 200 {object} models.User
 // @Failure 400 {string} string "Invalid input"
 // @Failure 500 {string} string "Internal server error"
 // @Router /api/auth/register [post]
 func Register(c *fiber.Ctx) error {
-	var req models.UserResponseReq
+	var req models.UserRegisterResponseReq
 	if err := c.BodyParser(&req); err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": "Geçersiz giriş"})
 	}
@@ -53,14 +53,14 @@ func Register(c *fiber.Ctx) error {
 // @Tags auth
 // @Accept json
 // @Produce json
-// @Param user body models.UserResponseReq true "User login credentials"
+// @Param user body models.UserLoginResponseReq true "User login credentials"
 // @Success 200 {object} map[string]string
 // @Failure 400 {string} string "Invalid input"
 // @Failure 401 {string} string "Invalid username or password"
 // @Failure 500 {string} string "Token could not be created"
 // @Router /api/auth/login [post]
 func Login(c *fiber.Ctx) error {
-	var req models.UserResponseReq
+	var req models.UserLoginResponseReq
 	if err := c.BodyParser(&req); err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": "Invalid input"})
 	}
@@ -137,7 +137,7 @@ func GetAllUsers(c *fiber.Ctx) error {
 // @Produce json
 // @Security BearerAuth
 // @Param id path int true "User ID"
-// @Param role body map[string]string true "Role data"
+// @Param role body models.UpdateUserRoleRequest true "Role data"
 // @Success 200 {object} map[string]string
 // @Failure 400 {string} string "Bad request"
 // @Failure 401 {string} string "Unauthorized"

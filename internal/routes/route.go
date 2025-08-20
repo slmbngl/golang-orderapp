@@ -25,6 +25,8 @@ func SetupRoutes(app *fiber.App) {
 	// Admin endpoints (Admin role required)
 	SetupAdminRoutes(api)
 
+	// Warehouse management endpoints (Admin role required)
+	SetupWarehouseRoutes(api)
 }
 
 func SetupAuthRoutes(api fiber.Router) {
@@ -62,4 +64,34 @@ func SetupAdminRoutes(api fiber.Router) {
 	admin := api.Group("/admin", middleware.JWTMiddleware(), middleware.AdminMiddleware())
 	admin.Get("/users", handler.GetAllUsers)             // List all users
 	admin.Put("/users/:id/role", handler.UpdateUserRole) // Update user role
+}
+
+func SetupWarehouseRoutes(api fiber.Router) {
+	// Warehouse management routes (JWT + Admin gerekli)
+	warehouses := api.Group("/warehouses", middleware.JWTMiddleware(), middleware.AdminMiddleware())
+	warehouses.Post("/", handler.CreateWarehouse)
+	warehouses.Get("/", handler.GetAllWarehouses)
+	warehouses.Get("/:id", handler.GetWarehouseByID)
+	warehouses.Put("/:id", handler.UpdateWarehouse)
+	warehouses.Delete("/:id", handler.DeleteWarehouse)
+
+	// Warehouse-specific stock routes (JWT + Admin gerekli)
+	warehouses.Get("/:id/stocks", handler.GetWarehouseStocks)
+	warehouses.Get("/:warehouseId/stocks/:productId", handler.GetProductStockInWarehouse)
+	warehouses.Put("/:warehouseId/stocks/:productId", handler.UpdateStock)
+	warehouses.Post("/:warehouseId/stocks/:productId/add", handler.AddStock)
+
+	// Global stock routes (Sadece JWT gerekli - görüntüleme için)
+	stocks := api.Group("/stocks", middleware.JWTMiddleware())
+	stocks.Get("/", handler.GetAllStocks)
+
+	// Transfer management routes (Sadece JWT gerekli)
+	transfers := api.Group("/transfers", middleware.JWTMiddleware())
+	transfers.Post("/", handler.CreateStockTransfer)
+	transfers.Get("/", handler.GetAllTransfers)
+	transfers.Get("/:id", handler.GetTransferByID)
+
+	// Admin only routes for transfer management (JWT + Admin gerekli)
+	transfers.Put("/:id/status", middleware.AdminMiddleware(), handler.UpdateTransferStatus)
+	transfers.Post("/:id/process", middleware.AdminMiddleware(), handler.ProcessTransfer)
 }

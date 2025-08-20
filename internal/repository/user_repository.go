@@ -116,8 +116,8 @@ func (r *userRepo) UpdateUserRole(userID int, role string) error {
 func (r *userRepo) GetByID(userID int) (*models.GetMeResponseReq, error) {
 	var user models.GetMeResponseReq
 	err := db.Pool.QueryRow(context.Background(),
-		`SELECT id, username, is_active, created_at FROM users WHERE id = $1`,
-		userID).Scan(&user.ID, &user.Username, &user.IsActive, &user.CreatedAt)
+		`SELECT id, username, is_active, created_at, role FROM users WHERE id = $1`,
+		userID).Scan(&user.ID, &user.Username, &user.IsActive, &user.CreatedAt, &user.Role)
 
 	if err != nil {
 		return nil, err

@@ -23,8 +23,7 @@ import (
 func GetOrders(c *fiber.Ctx) error {
 	userID := c.Locals("user_id").(int)
 
-	orderRepo := repository.NewOrderRepository()
-	orders, err := orderRepo.GetOrdersByUserID(userID)
+	orders, err := repository.GetOrdersByUserID(userID)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 	}

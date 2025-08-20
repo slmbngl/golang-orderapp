@@ -58,8 +58,7 @@ func GetProductByID(c *fiber.Ctx) error {
 	return c.JSON(product)
 }
 
-// CreateProduct godoc
-// @Summary Create a new product
+// @Summary Create a product
 // @Description Create a new product (Admin only)
 // @Tags products
 // @Accept json
@@ -86,7 +85,6 @@ func CreateProduct(c *fiber.Ctx) error {
 	return c.Status(201).JSON(product)
 }
 
-// UpdateProduct godoc
 // @Summary Update a product
 // @Description Update an existing product (Admin only)
 // @Tags products
@@ -102,8 +100,7 @@ func CreateProduct(c *fiber.Ctx) error {
 // @Failure 500 {string} string "Internal server error"
 // @Router /api/products/{id} [put]
 func UpdateProduct(c *fiber.Ctx) error {
-	idStr := c.Params("id")
-	id, err := strconv.Atoi(idStr)
+	id, err := strconv.Atoi(c.Params("id"))
 	if err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": "Invalid product ID"})
 	}
@@ -112,7 +109,6 @@ func UpdateProduct(c *fiber.Ctx) error {
 	if err := c.BodyParser(&productReq); err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": "Invalid data"})
 	}
-
 	productRepo := repository.NewProductRepository()
 	err = productRepo.UpdateProduct(id, &productReq)
 	if err != nil {
@@ -122,7 +118,7 @@ func UpdateProduct(c *fiber.Ctx) error {
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 	}
 
-	return c.JSON(fiber.Map{"message": "Product successfully updated"})
+	return c.JSON(fiber.Map{"message": "Product updated successfully"})
 }
 
 // DeleteProduct godoc

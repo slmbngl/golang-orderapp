@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"strconv"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/slmbngl/OrderAplication/internal/adapters/db"
@@ -10,7 +11,6 @@ import (
 )
 
 type OrderRepository interface {
-	GetOrdersByUserID(userID int) ([]models.Order, error)
 	GetOrderByID(orderID, userID int) (*models.Order, error)
 	GetOrderItems(orderID int) ([]models.OrderItem, error)
 	CreateOrder(userID int, items []models.CreateOrderItemRequest) (*models.OrderWithItems, error)
@@ -24,8 +24,9 @@ func NewOrderRepository() OrderRepository {
 	return &orderRepo{}
 }
 
-func (r *orderRepo) GetOrdersByUserID(userID int) ([]models.Order, error) {
-	rows, err := db.Pool.Query(context.Background(),
+func GetOrdersByUserID(userID int) ([]models.OrderWithItems, error) {
+	// Önce siparişleri al
+	orderRows, err := db.Pool.Query(context.Background(),
 		`SELECT DISTINCT order_id, user_id, total_amount, status, created_at, username 
          FROM order_summary_view 
          WHERE user_id = $1 
@@ -33,24 +34,33 @@ func (r *orderRepo) GetOrdersByUserID(userID int) ([]models.Order, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer orderRows.Close()
 
-	var orders []models.Order
-	for rows.Next() {
+	var ordersWithItems []models.OrderWithItems
+	for orderRows.Next() {
 		var order models.Order
-
-		err := rows.Scan(&order.ID, &order.UserID, &order.TotalAmount,
+		err := orderRows.Scan(&order.ID, &order.UserID, &order.TotalAmount,
 			&order.Status, &order.CreatedAt, &order.Username)
 		if err != nil {
 			return nil, err
 		}
 
-		orders = append(orders, order)
+		// Her sipariş için items'ları al
+		orderRepo := NewOrderRepository()
+		items, err := orderRepo.GetOrderItems(order.ID)
+		if err != nil {
+			return nil, err
+		}
+
+		orderWithItems := models.OrderWithItems{
+			Order: order,
+			Items: items,
+		}
+		ordersWithItems = append(ordersWithItems, orderWithItems)
 	}
 
-	return orders, nil
+	return ordersWithItems, nil
 }
-
 func (r *orderRepo) GetOrderByID(orderID, userID int) (*models.Order, error) {
 	var order models.Order
 	err := db.Pool.QueryRow(context.Background(),
@@ -101,6 +111,31 @@ func (r *orderRepo) CreateOrder(userID int, items []models.CreateOrderItemReques
 	}
 	defer tx.Rollback(context.Background())
 
+	// Create product repository instance
+	productRepo := NewProductRepository()
+
+	// Check warehouse stock for all items first
+	for _, item := range items {
+		_, err := productRepo.CheckWarehouseStock(item.ProductID, item.Quantity)
+		if err != nil {
+			if warehouseErr, ok := err.(*InsufficientWarehouseStockError); ok {
+				return nil, errors.New("insufficient warehouse stock for product ID: " +
+					strconv.Itoa(warehouseErr.ProductID))
+			}
+			return nil, err
+		}
+
+		// Additional check: ensure product exists and get details
+		var productPrice float64
+		var productName, productDescription string
+		err = tx.QueryRow(context.Background(),
+			"SELECT price, name, description FROM products WHERE id = $1",
+			item.ProductID).Scan(&productPrice, &productName, &productDescription)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	// Create order with total_amount = 0 initially
 	var orderID int
 	err = tx.QueryRow(context.Background(),
@@ -114,20 +149,14 @@ func (r *orderRepo) CreateOrder(userID int, items []models.CreateOrderItemReques
 	var orderItems []models.OrderItem
 	var totalAmount float64
 	for _, item := range items {
-		// Get product price
+		// Get product details again
 		var productPrice float64
 		var productName, productDescription string
-		var productStock int
 		err = tx.QueryRow(context.Background(),
-			"SELECT price, name, description, stock FROM products WHERE id = $1",
-			item.ProductID).Scan(&productPrice, &productName, &productDescription, &productStock)
+			"SELECT price, name, description FROM products WHERE id = $1",
+			item.ProductID).Scan(&productPrice, &productName, &productDescription)
 		if err != nil {
 			return nil, err
-		}
-
-		// Check if enough stock is available
-		if productStock < item.Quantity {
-			return nil, errors.New("insufficient stock for product: " + productName)
 		}
 
 		// Insert order item
@@ -182,23 +211,6 @@ func (r *orderRepo) CreateOrder(userID int, items []models.CreateOrderItemReques
 	return orderWithItems, nil
 }
 
-func (r *orderRepo) DeleteOrder(orderID, userID int) error {
-	result, err := db.Pool.Exec(context.Background(),
-		"DELETE FROM orders WHERE id = $1 AND user_id = $2",
-		orderID, userID)
-
-	if err != nil {
-		return err
-	}
-
-	rowsAffected := result.RowsAffected()
-	if rowsAffected == 0 {
-		return pgx.ErrNoRows
-	}
-
-	return nil
-}
-
 func (r *orderRepo) UpdateOrderStatus(orderID, userID int, status string) error {
 	// Begin transaction
 	tx, err := db.Pool.Begin(context.Background())
@@ -234,7 +246,10 @@ func (r *orderRepo) UpdateOrderStatus(orderID, userID int, status string) error 
 		return pgx.ErrNoRows
 	}
 
-	// If status is confirmed, update stock
+	// Create product repository instance for warehouse operations
+	productRepo := NewProductRepository()
+
+	// If status is confirmed, check and update warehouse stock
 	if status == "confirmed" && currentStatus != "confirmed" {
 		// Get order items
 		items, err := r.GetOrderItems(orderID)
@@ -242,53 +257,40 @@ func (r *orderRepo) UpdateOrderStatus(orderID, userID int, status string) error 
 			return err
 		}
 
-		// Update stock for each item
+		// Check and update warehouse stock for each item
 		for _, item := range items {
-			// Check stock availability
-			var currentStock int
-			err = tx.QueryRow(context.Background(),
-				"SELECT stock FROM products WHERE id = $1",
-				item.ProductID).Scan(&currentStock)
+			// Check warehouse stock availability
+			_, err := productRepo.CheckWarehouseStock(item.ProductID, item.Quantity)
 			if err != nil {
+				if warehouseErr, ok := err.(*InsufficientWarehouseStockError); ok {
+					return errors.New("insufficient warehouse stock for product: " + item.ProductName +
+						", required: " + strconv.Itoa(warehouseErr.RequiredStock) +
+						", available: " + strconv.Itoa(warehouseErr.AvailableStock))
+				}
 				return err
 			}
 
-			if currentStock < item.Quantity {
-				return pgx.ErrNoRows // Not enough stock
-			}
-
-			// Update stock
-			_, err = tx.Exec(context.Background(),
-				"UPDATE products SET stock = stock - $1 WHERE id = $2",
-				item.Quantity, item.ProductID)
+			// Update warehouse stock (decrease)
+			err = productRepo.UpdateWarehouseStock(item.ProductID, item.Quantity, "decrease")
 			if err != nil {
 				return err
 			}
 		}
 	}
 
-	if status == "cancelled" && currentStatus == "confirmed" || status == "pending" && currentStatus == "confirmed" {
+	// If status is cancelled or pending from confirmed, restore warehouse stock
+	if (status == "cancelled" && currentStatus == "confirmed") ||
+		(status == "pending" && currentStatus == "confirmed") {
 		// Get order items
 		items, err := r.GetOrderItems(orderID)
 		if err != nil {
 			return err
 		}
 
-		// Update stock for each item
+		// Restore warehouse stock for each item
 		for _, item := range items {
-			// Check stock availability
-			var currentStock int
-			err = tx.QueryRow(context.Background(),
-				"SELECT stock FROM products WHERE id = $1",
-				item.ProductID).Scan(&currentStock)
-			if err != nil {
-				return err
-			}
-
-			// Update stock
-			_, err = tx.Exec(context.Background(),
-				"UPDATE products SET stock = stock + $1 WHERE id = $2",
-				item.Quantity, item.ProductID)
+			// Update warehouse stock (increase)
+			err = productRepo.UpdateWarehouseStock(item.ProductID, item.Quantity, "increase")
 			if err != nil {
 				return err
 			}
@@ -297,4 +299,21 @@ func (r *orderRepo) UpdateOrderStatus(orderID, userID int, status string) error 
 
 	// Commit transaction
 	return tx.Commit(context.Background())
+}
+
+func (r *orderRepo) DeleteOrder(orderID, userID int) error {
+	result, err := db.Pool.Exec(context.Background(),
+		"DELETE FROM orders WHERE id = $1 AND user_id = $2",
+		orderID, userID)
+
+	if err != nil {
+		return err
+	}
+
+	rowsAffected := result.RowsAffected()
+	if rowsAffected == 0 {
+		return pgx.ErrNoRows
+	}
+
+	return nil
 }

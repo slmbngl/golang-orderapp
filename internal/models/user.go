@@ -15,6 +15,16 @@ type GetMeResponseReq struct {
 	Username  string    `json:"username"`
 	CreatedAt time.Time `json:"created_at"`
 	IsActive  bool      `json:"is_active" db:"is_active"`
+	Role      string    `json:"role"`
+}
+type UserLoginResponseReq struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+type UserRegisterResponseReq struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+	Role     string `json:"role"`
 }
 type UserResponseReq struct {
 	Username string `json:"username"`
@@ -25,6 +35,10 @@ type UserResponseReq struct {
 type RegisterRequest struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
+}
+
+type UpdateUserRoleRequest struct {
+	Role string `json:"role" validate:"required,oneof=user admin" example:"admin"`
 }
 
 // RefreshTokenRequest represents the request body for refresh token endpoint
