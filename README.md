@@ -3,19 +3,19 @@ This project is a REST API with user authentication, product management, and ord
 
 ## Features
 
-### 🔐 Authentication
+### Authentication
 - User registration and login
 - JWT token-based authentication
 - Secure password hashing
 
-### 📦 Product Management
+### Product Management
 - List all products
 - View product details
 - Add new products (Admin)
 - Update products (Admin)
 - Delete products (Admin)
 
-### 🛒 Order Management
+### Order Management
 - Create orders
 - List user orders
 - View order details
